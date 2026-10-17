@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photobooth Digital DELIMa 3.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        body {
+            background-color: #f0fdf4;
+            background-image: radial-gradient(#bbf7d0 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        .kamera-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 1024px;
+            margin: 0 auto;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            background-color: #000;
+            border: 8px solid #ffffff;
+            transition: aspect-ratio 0.3s ease;
+        }
+
+        #kamera {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            /* Kesan cermin kini dikawal secara pintar oleh JavaScript */
+        }
+
+        #bingkai-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center py-4 md:py-8 font-sans">
+
+    <div class="text-center mb-4 md:mb-6 px-2 md:px-4">
+        <h1 class="text-3xl md:text-5xl font-extrabold text-blue-800 mb-2 drop-shadow-md">
+            Photobooth Digital
+        </h1>
+        <p class="text-lg md:text-2xl text-blue-600 font-semibold">
+            Peluncuran Delima 3.0 dan Pelaksanaan DCS Daerah Pekan 2026
+        </p>
+    </div>
+
+    <div id="ruang-kamera" class="w-full px-2 md:px-4 mb-6 text-center">
+        <!-- Container kamera & Bingkai -->
+        <div id="kamera-wrapper" class="kamera-wrapper relative">
+            
+            <video id="kamera" autoplay playsinline></video>
+            <img id="bingkai-overlay" src="bingkai_landscape.png" alt="Bingkai Photobooth">
+            
+            <!-- BUTANG TUKAR KAMERA -->
+            <button id="butang-tukar-kamera" class="absolute top-4 right-4 bg-white/80 hover:bg-white text-blue-800 font-bold p-3 rounded-full shadow-lg z-20 transition backdrop-blur-sm text-sm md:text-base">
+                🔄 <span class="hidden md:inline ml-1">Tukar Kamera</span>
+            </button>
+
+            <div id="amaran-kamera" class="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80 text-white p-6 hidden z-20">
+                <p class="text-xl font-bold text-center">Sila benarkan (Allow) akses kamera di pelayar web anda.</p>
+            </div>
+        </div>
+        
+        <button id="butang-snap" class="mt-8 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black py-4 px-12 rounded-full text-2xl shadow-[0_10px_20px_rgba(37,99,235,0.4)] transition-all duration-300 transform hover:scale-105 hover:-translate-y-1 active:scale-95 border-4 border-blue-300">
+            📸 SNAP GAMBAR!
+        </button>
+    </div>
+
+    <div id="ruang-hasil" class="w-full px-4 text-center hidden">
+        <h2 class="text-3xl font-bold text-green-600 mb-6 drop-shadow-sm">Gambar Berjaya Disimpan! 🎉</h2>
+        
+        <div class="kamera-wrapper mb-8">
+            <img id="gambar-hasil" class="w-full h-full object-cover" src="" alt="Hasil Photobooth">
+        </div>
+        
+        <div class="flex flex-wrap justify-center gap-4 md:gap-6">
+            <button id="butang-semula" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 md:py-4 px-8 md:px-10 rounded-full shadow-lg transition transform hover:scale-105 text-lg md:text-xl">
+                🔄 Ambil Gambar Baru
+            </button>
+            <a id="butang-muatturun" href="#" class="hidden"></a>
+        </div>
+        <p class="mt-4 text-gray-600 font-medium text-sm md:text-base">*Gambar sepatutnya dimuat turun secara automatik.</p>
+        <p class="mt-2 text-sm text-red-600 font-bold md:hidden animate-pulse">📱 Pengguna Telefon: Jika gambar tidak masuk ke galeri, tekan lama pada gambar di atas dan pilih "Save Image".</p>
+    </div>
+
+    <canvas id="canvas" class="hidden"></canvas>
+
+    <script>
+        // URL Jambatan Google Apps Script Cikgu
+        const URL_GOOGLE_SCRIPT = "https://script.google.com/macros/s/AKfycbyIcPBN7vsSdO6aSaeXXkVxRA2I65-fGL5yuaqnb8IsHwWQihWYGxk8rhdraDjBGwMX/exec";
+
+        const video = document.getElementById('kamera');
+        const bingkaiOverlay = document.getElementById('bingkai-overlay');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const gambarHasil = document.getElementById('gambar-hasil');
+        const butangSnap = document.getElementById('butang-snap');
+        const butangSemula = document.getElementById('butang-semula');
+        const butangMuatTurun = document.getElementById('butang-muatturun');
+        const ruangKamera = document.getElementById('ruang-kamera');
+        const ruangHasil = document.getElementById('ruang-hasil');
+        const amaranKamera = document.getElementById('amaran-kamera');
+        const kameraWrapper = document.getElementById('kamera-wrapper');
+
+        let isPortrait = false;
+
+        function semakOrientasi() {
+            if (window.innerHeight > window.innerWidth) {
+                isPortrait = true;
+                kameraWrapper.style.aspectRatio = "9 / 16";
+                bingkaiOverlay.src = "bingkai_portrait.png";
+            } else {
+                isPortrait = false;
+                kameraWrapper.style.aspectRatio = "16 / 9";
+                bingkaiOverlay.src = "bingkai_landscape.png";
+            }
+        }
+        
+        window.addEventListener('resize', semakOrientasi);
+        window.addEventListener('orientationchange', () => setTimeout(semakOrientasi, 200)); 
+        semakOrientasi(); // Jalankan sekali semasa mula buka
+
+        let modKamera = "user"; // Mula dengan kamera depan (selfie)
+        let streamSemasa = null;
+        const butangTukarKamera = document.getElementById('butang-tukar-kamera');
+
+        function mulakanKamera() {
+            // Hentikan kamera sebelumnya dan buang dari memori
+            if (streamSemasa) {
+                streamSemasa.getTracks().forEach(track => track.stop());
+                video.srcObject = null; 
+            }
+            
+            // Ubah kesan cermin pada paparan video
+            if (modKamera === "user") {
+                video.style.transform = "scaleX(-1)"; // Mirror jika selfie
+            } else {
+                video.style.transform = "scaleX(1)";  // Normal jika kamera belakang
+            }
+
+            // Beri masa (0.2 saat) supaya sistem telefon melepaskan "lock" pada lensa kamera lama
+            setTimeout(() => {
+                // Kod 'exact' untuk memaksa telefon guna lensa belakang
+                let kekangan = {
+                    video: { 
+                        facingMode: modKamera === "environment" ? { exact: "environment" } : "user",
+                        width: { ideal: 1920 }, 
+                        height: { ideal: 1080 }
+                    }
+                };
+
+                navigator.mediaDevices.getUserMedia(kekangan)
+                .then(stream => {
+                    streamSemasa = stream;
+                    video.srcObject = stream;
+                })
+                .catch(err => {
+                    console.log("Cuba kamera alternatif...", err);
+                    // Jika kod paksa gagal (contoh: buka guna laptop yg tiada kamera belakang)
+                    // Ia akan guna fungsi asal tanpa paksaan (fallback)
+                    navigator.mediaDevices.getUserMedia({ 
+                        video: { 
+                            facingMode: modKamera,
+                            width: { ideal: 1920 },
+                            height: { ideal: 1080 }
+                        } 
+                    })
+                    .then(stream2 => {
+                        streamSemasa = stream2;
+                        video.srcObject = stream2;
+                    })
+                    .catch(err2 => {
+                        console.error("Ralat kamera:", err2);
+                        amaranKamera.classList.remove('hidden');
+                    });
+                });
+            }, 200); 
+        }
+
+        mulakanKamera(); // Mula kamera sebaik web dibuka
+
+        butangTukarKamera.addEventListener('click', () => {
+            modKamera = (modKamera === "user") ? "environment" : "user";
+            mulakanKamera();
+        });
+
+        butangSnap.addEventListener('click', () => {
+            // Mainkan bunyi shutter maya
+            const snapSound = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-camera-shutter-click-1133.mp3');
+            snapSound.play().catch(e => console.log("Audio terhalang oleh pelayar"));
+
+            // Tingkatkan saiz canvas kepada resolusi HD untuk hasil yang tajam
+            if (isPortrait) {
+                canvas.width = 1080;
+                canvas.height = 1920;
+            } else {
+                canvas.width = 1920;
+                canvas.height = 1080;
+            }
+
+            let sWidth = video.videoWidth;
+            let sHeight = video.videoHeight;
+            let sx = 0, sy = 0;
+            const targetRatio = canvas.width / canvas.height;
+            const videoRatio = sWidth / sHeight;
+
+            if (videoRatio > targetRatio) {
+                let newWidth = sHeight * targetRatio;
+                sx = (sWidth - newWidth) / 2;
+                sWidth = newWidth;
+            } else {
+                let newHeight = sWidth / targetRatio;
+                sy = (sHeight - newHeight) / 2;
+                sHeight = newHeight;
+            }
+
+            if (modKamera === "user") {
+                // Jika kamera selfie, terbalikkan imej seperti cermin
+                ctx.save(); 
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1); 
+                ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+                ctx.restore();
+            } else {
+                // Kamera belakang tidak perlu kesan cermin
+                ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+            }
+
+            // Lukis bingkai
+            if (bingkaiOverlay.complete && bingkaiOverlay.naturalHeight !== 0) {
+                 ctx.drawImage(bingkaiOverlay, 0, 0, canvas.width, canvas.height);
+            }
+
+            const dataImej = canvas.toDataURL('image/png');
+            gambarHasil.src = dataImej;
+            butangMuatTurun.href = dataImej;
+
+            const timestamp = new Date().getTime(); 
+            const namaFailImej = `Photobooth_DELIMa_${timestamp}.png`;
+            butangMuatTurun.download = namaFailImej;
+            
+            // HANTAR KE DRIVE DAHULU secara senyap
+            fetch(URL_GOOGLE_SCRIPT, {
+                method: 'POST',
+                body: JSON.stringify({ image: dataImej, filename: namaFailImej }),
+                headers: {
+                    "Content-Type": "text/plain;charset=utf-8",
+                },
+                redirect: "follow" 
+            })
+            .catch(error => console.error("Ralat simpan ke Drive:", error));
+
+            // Beri masa (delay 0.5 saat) untuk elak isu Apple/iPhone menyekat fungsi download
+            setTimeout(() => {
+                butangMuatTurun.click(); 
+            }, 500);
+
+            // Tukar paparan skrin
+            ruangKamera.classList.add('hidden');
+            ruangHasil.classList.remove('hidden');
+        });
+
+        // Butang untuk kembali ambil gambar semula
+        butangSemula.addEventListener('click', () => {
+            ruangKamera.classList.remove('hidden');
+            ruangHasil.classList.add('hidden');
+        });
+    </script>
+</body>
+</html>
